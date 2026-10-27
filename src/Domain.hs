@@ -7,6 +7,10 @@ module Domain
   , loanStatus
   , isLoanOverdue
   , calculateLoanFine
+  , findBook
+  , findUser
+  , booksByCategory
+  , allCategories
   ) where
 
 import Model
@@ -68,3 +72,38 @@ isLoanOverdue currentDay loan =
 calculateLoanFine :: Days -> UserType -> Loan -> Double
 calculateLoanFine currentDay uType loan =
   fromIntegral (delayDays currentDay loan) * dailyFineRate uType
+
+-- Pesquisa e filtragem recursiva sobre listas
+
+findBook :: BookId -> [Book] -> Maybe Book
+findBook _ [] = Nothing
+findBook targetId (b:bs)
+  | bookId b == targetId = Just b
+  | otherwise            = findBook targetId bs
+
+findUser :: UserId -> [User] -> Maybe User
+findUser _ [] = Nothing
+findUser targetId (u:us)
+  | userId u == targetId = Just u
+  | otherwise            = findUser targetId us
+
+booksByCategory :: Category -> [Book] -> [Book]
+booksByCategory _ [] = []
+booksByCategory cat (b:bs)
+  | bookCategory b == cat = b : booksByCategory cat bs
+  | otherwise             = booksByCategory cat bs
+
+belongsTo :: Eq a => a -> [a] -> Bool
+belongsTo _ [] = False
+belongsTo val (x:xs)
+  | val == x  = True
+  | otherwise = belongsTo val xs
+
+allCategories :: [Book] -> [Category]
+allCategories books = collectUnique books []
+  where
+    collectUnique :: [Book] -> [Category] -> [Category]
+    collectUnique [] acc = acc
+    collectUnique (b:bs) acc
+      | belongsTo (bookCategory b) acc = collectUnique bs acc
+      | otherwise                      = collectUnique bs (acc ++ [bookCategory b])
