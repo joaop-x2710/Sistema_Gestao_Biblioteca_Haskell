@@ -12,22 +12,34 @@ main :: IO ()
 main = do
   configureEncoding
   putStrLn "========================================================================"
-  putStrLn "  SISTEMA DE GESTÃO DE BIBLIOTECA E EMPRÉSTIMOS (Fase 1 - Base)"
+  putStrLn "  SISTEMA DE GESTÃO DE BIBLIOTECA E EMPRÉSTIMOS (Fase 1 - Demonstração)"
   putStrLn $ "  Dia de referência: " ++ show referenceDay
   putStrLn "========================================================================"
 
-  putStrLn "\n1. CATÁLOGO DE LIVROS"
+  putStrLn "\n1. CATÁLOGO DE LIVROS E DISPONIBILIDADE"
   putStrLn "------------------------------------------------------------------------"
-  mapM_ (putStrLn . formatBookLine) sampleBooks
+  mapM_ (putStrLn . formatBookLine sampleLoans) sampleBooks
   putStrLn $ "Categorias registadas: " ++ intercalate ", " (allCategories sampleBooks)
 
-  putStrLn "\n2. UTENTES REGISTADOS E REGRAS POR PERFIL"
+  putStrLn "\n2. UTENTES REGISTADOS E RESUMO DE EMPRÉSTIMOS / COIMAS"
   putStrLn "------------------------------------------------------------------------"
-  mapM_ (putStrLn . formatUserLine) sampleUsers
+  mapM_ (putStrLn . formatUserLine referenceDay sampleLoans) sampleUsers
 
-  putStrLn "\n3. ESTADO DOS EMPRÉSTIMOS REGISTADOS"
+  putStrLn "\n3. RESUMO DOS EMPRÉSTIMOS"
   putStrLn "------------------------------------------------------------------------"
-  mapM_ (putStrLn . formatLoanLine referenceDay sampleBooks sampleUsers) sampleLoans
+  let summaries = buildAllSummaries referenceDay sampleBooks sampleUsers sampleLoans
+  mapM_ (putStrLn . formatSummaryLine) summaries
+
+  putStrLn "\n4. VERIFICAÇÃO DE ELEGIBILIDADE PARA NOVO EMPRÉSTIMO (Livro 101)"
+  putStrLn "------------------------------------------------------------------------"
+  case findBook 101 sampleBooks of
+    Nothing -> putStrLn "Livro 101 não encontrado."
+    Just book ->
+      mapM_ (putStrLn . formatEligibility referenceDay book sampleLoans) sampleUsers
+
+  putStrLn "\n5. VALIDAÇÃO DE REFERÊNCIAS (Demonstração com dados inválidos)"
+  putStrLn "------------------------------------------------------------------------"
+  mapM_ putStrLn (validateLoanReferences sampleBooks sampleUsers sampleInvalidLoans)
 
 configureEncoding :: IO ()
 configureEncoding = do
@@ -35,37 +47,42 @@ configureEncoding = do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
 
-formatBookLine :: Book -> String
-formatBookLine book =
+formatBookLine :: [Loan] -> Book -> String
+formatBookLine loans book =
   show (bookId book)
     ++ " | " ++ bookTitle book
     ++ " (" ++ bookAuthor book ++ ")"
     ++ " | Cat: " ++ bookCategory book
-    ++ " | Exemplares: " ++ show (bookTotalCopies book)
+    ++ " | Disponíveis: " ++ show (availableCopies book loans)
+    ++ "/" ++ show (bookTotalCopies book)
 
-formatUserLine :: User -> String
-formatUserLine user =
+formatUserLine :: Days -> [Loan] -> User -> String
+formatUserLine currentDay loans user =
   show (userId user)
     ++ " | " ++ userName user
-    ++ " (" ++ formatUserType uType ++ ")"
-    ++ " | Limite: " ++ show (maxLoansForType uType)
-    ++ " | Prazo: " ++ show (loanDurationForType uType) ++ " dias"
-    ++ " | Taxa diária: " ++ formatCurrency (dailyFineRate uType)
+    ++ " (" ++ formatUserType (userType user) ++ ")"
+    ++ " | Ativos: " ++ show activeCount ++ "/" ++ show maxAllowed
+    ++ " | Coimas acumuladas: " ++ formatCurrency totalFine
   where
-    uType = userType user
+    activeCount = length (activeLoansForUser (userId user) loans)
+    maxAllowed  = maxLoansForType (userType user)
+    totalFine   = totalFinesForUser currentDay user loans
 
-formatLoanLine :: Days -> [Book] -> [User] -> Loan -> String
-formatLoanLine currentDay books users loan =
-  "#" ++ show (loanId loan)
-    ++ " | " ++ bTitle
-    ++ " | " ++ uName
-    ++ " | " ++ formatStatus (loanStatus currentDay loan)
-    ++ " | Coima: " ++ formatCurrency fine
+formatSummaryLine :: LoanSummary -> String
+formatSummaryLine summary =
+  "#" ++ show (loanId (summaryLoan summary))
+    ++ " | " ++ summaryBookTitle summary
+    ++ " | " ++ summaryUserName summary
+    ++ " | " ++ formatStatus (summaryStatus summary)
+    ++ " | Coima: " ++ formatCurrency (summaryFine summary)
+
+formatEligibility :: Days -> Book -> [Loan] -> User -> String
+formatEligibility currentDay book loans user =
+  userName user ++ " -> " ++ statusText
   where
-    bTitle = maybe "Livro desconhecido" bookTitle (findBook (loanBookId loan) books)
-    mUser  = findUser (loanUserId loan) users
-    uName  = maybe "Utente desconhecido" userName mUser
-    fine   = maybe 0.0 (\u -> calculateLoanFine currentDay (userType u) loan) mUser
+    statusText
+      | canUserBorrow currentDay user book loans = "PODE requisitar \"" ++ bookTitle book ++ "\""
+      | otherwise                                = "IMPEDIDO de requisitar \"" ++ bookTitle book ++ "\""
 
 formatUserType :: UserType -> String
 formatUserType StudentUser  = "Estudante"
@@ -73,10 +90,10 @@ formatUserType TeacherUser  = "Docente"
 formatUserType ExternalUser = "Externo"
 
 formatStatus :: LoanStatus -> String
-formatStatus ActiveOnTime      = "Ativo (dentro do prazo)"
-formatStatus (ActiveOverdue d) = "Ativo (EM ATRASO: " ++ show d ++ " dias)"
-formatStatus ReturnedOnTime    = "Devolvido (a tempo)"
-formatStatus (ReturnedLate d)  = "Devolvido (com atraso: " ++ show d ++ " dias)"
+formatStatus ActiveOnTime        = "Ativo (dentro do prazo)"
+formatStatus (ActiveOverdue d)   = "Ativo (EM ATRASO: " ++ show d ++ " dias)"
+formatStatus ReturnedOnTime      = "Devolvido (a tempo)"
+formatStatus (ReturnedLate d)    = "Devolvido (com atraso: " ++ show d ++ " dias)"
 
 formatCurrency :: Double -> String
 formatCurrency val = printf "%.2f EUR" val
