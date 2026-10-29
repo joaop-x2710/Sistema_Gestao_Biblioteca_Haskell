@@ -20,6 +20,9 @@ module Domain
   , hasOverdueLoans
   , canUserBorrow
   , totalFinesForUser
+  , buildLoanSummary
+  , buildAllSummaries
+  , validateLoanReferences
   ) where
 
 import Model
@@ -187,3 +190,40 @@ totalFinesForUser currentDay user loans = aux (loansForUser (userId user) loans)
     aux :: [Loan] -> Double -> Double
     aux [] acc = acc
     aux (l:ls) acc = aux ls (acc + calculateLoanFine currentDay uType l)
+
+-- Construção de resumos e validação de referências
+
+buildLoanSummary :: Days -> [Book] -> [User] -> Loan -> Maybe LoanSummary
+buildLoanSummary currentDay books users loan =
+  case (findBook (loanBookId loan) books, findUser (loanUserId loan) users) of
+    (Just book, Just user) ->
+      Just LoanSummary
+        { summaryLoan      = loan
+        , summaryBookTitle = bookTitle book
+        , summaryUserName  = userName user
+        , summaryStatus    = loanStatus currentDay loan
+        , summaryFine      = calculateLoanFine currentDay (userType user) loan
+        }
+    _ -> Nothing
+
+buildAllSummaries :: Days -> [Book] -> [User] -> [Loan] -> [LoanSummary]
+buildAllSummaries _ _ _ [] = []
+buildAllSummaries currentDay books users (l:ls) =
+  case buildLoanSummary currentDay books users l of
+    Just summary -> summary : buildAllSummaries currentDay books users ls
+    Nothing      -> buildAllSummaries currentDay books users ls
+
+validateLoanReferences :: [Book] -> [User] -> [Loan] -> [String]
+validateLoanReferences _ _ [] = []
+validateLoanReferences books users (l:ls) =
+  bookErrors ++ userErrors ++ validateLoanReferences books users ls
+  where
+    lid = show (loanId l)
+    bookErrors =
+      case findBook (loanBookId l) books of
+        Just _  -> []
+        Nothing -> ["Empréstimo " ++ lid ++ " refere livro inexistente: " ++ show (loanBookId l)]
+    userErrors =
+      case findUser (loanUserId l) users of
+        Just _  -> []
+        Nothing -> ["Empréstimo " ++ lid ++ " refere utente inexistente: " ++ show (loanUserId l)]

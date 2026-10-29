@@ -3,6 +3,7 @@ module SampleData
   , sampleBooks
   , sampleUsers
   , sampleLoans
+  , sampleInvalidLoans
   ) where
 
 import Model
@@ -40,3 +41,11 @@ sampleLoans =
   , -- Empréstimo ativo dentro do prazo para docente
     Loan 5 103 2 10 40 Nothing
   ]
+
+-- Conjunto auxiliar com referências inválidas para demonstrar a validação
+sampleInvalidLoans :: [Loan]
+sampleInvalidLoans =
+  sampleLoans
+    ++ [ Loan 99 999 1 10 25 Nothing
+       , Loan 100 101 888 12 27 Nothing
+       ]
