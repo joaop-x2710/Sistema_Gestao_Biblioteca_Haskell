@@ -11,6 +11,15 @@ module Domain
   , findUser
   , booksByCategory
   , allCategories
+  , loansForUser
+  , activeLoansForUser
+  , activeLoansCountForBook
+  , availableCopies
+  , isBookAvailable
+  , overdueLoans
+  , hasOverdueLoans
+  , canUserBorrow
+  , totalFinesForUser
   ) where
 
 import Model
@@ -107,3 +116,74 @@ allCategories books = collectUnique books []
     collectUnique (b:bs) acc
       | belongsTo (bookCategory b) acc = collectUnique bs acc
       | otherwise                      = collectUnique bs (acc ++ [bookCategory b])
+
+loansForUser :: UserId -> [Loan] -> [Loan]
+loansForUser _ [] = []
+loansForUser uid (l:ls)
+  | loanUserId l == uid = l : loansForUser uid ls
+  | otherwise           = loansForUser uid ls
+
+activeLoansForUser :: UserId -> [Loan] -> [Loan]
+activeLoansForUser _ [] = []
+activeLoansForUser uid (l:ls)
+  | loanUserId l == uid && isLoanActive l = l : activeLoansForUser uid ls
+  | otherwise                             = activeLoansForUser uid ls
+
+-- Contagem recursiva com acumulador de exemplares emprestados
+
+activeLoansCountForBook :: BookId -> [Loan] -> Int
+activeLoansCountForBook bid loans = aux loans 0
+  where
+    aux :: [Loan] -> Int -> Int
+    aux [] acc = acc
+    aux (l:ls) acc
+      | loanBookId l == bid && isLoanActive l = aux ls (acc + 1)
+      | otherwise                             = aux ls acc
+
+availableCopies :: Book -> [Loan] -> Int
+availableCopies book loans
+  | remaining > 0 = remaining
+  | otherwise     = 0
+  where
+    remaining = bookTotalCopies book - activeLoansCountForBook (bookId book) loans
+
+isBookAvailable :: Book -> [Loan] -> Bool
+isBookAvailable book loans = availableCopies book loans > 0
+
+overdueLoans :: Days -> [Loan] -> [Loan]
+overdueLoans _ [] = []
+overdueLoans currentDay (l:ls)
+  | isLoanOverdue currentDay l = l : overdueLoans currentDay ls
+  | otherwise                  = overdueLoans currentDay ls
+
+hasOverdueLoans :: Days -> UserId -> [Loan] -> Bool
+hasOverdueLoans _ _ [] = False
+hasOverdueLoans currentDay uid (l:ls)
+  | loanUserId l == uid && isActiveOverdue = True
+  | otherwise                              = hasOverdueLoans currentDay uid ls
+  where
+    isActiveOverdue =
+      case loanStatus currentDay l of
+        ActiveOverdue _ -> True
+        _               -> False
+
+-- Regra de elegibilidade para novo empréstimo
+
+canUserBorrow :: Days -> User -> Book -> [Loan] -> Bool
+canUserBorrow currentDay user book loans =
+  isBookAvailable book loans
+    && activeCount < maxAllowed
+    && not (hasOverdueLoans currentDay (userId user) loans)
+  where
+    activeCount = length (activeLoansForUser (userId user) loans)
+    maxAllowed  = maxLoansForType (userType user)
+
+-- Cálculo recursivo com acumulador do total de coimas de um utente
+
+totalFinesForUser :: Days -> User -> [Loan] -> Double
+totalFinesForUser currentDay user loans = aux (loansForUser (userId user) loans) 0.0
+  where
+    uType = userType user
+    aux :: [Loan] -> Double -> Double
+    aux [] acc = acc
+    aux (l:ls) acc = aux ls (acc + calculateLoanFine currentDay uType l)
